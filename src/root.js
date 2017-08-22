@@ -238,7 +238,6 @@ Root.prototype.loadSync = function loadSync(filename, options) {
 
 Root.prototype.loadSource = function loadSource(source, callback) {
 
-
     var self = this;
 
     function finish(err, root) {
@@ -247,13 +246,11 @@ Root.prototype.loadSource = function loadSource(source, callback) {
             return;
         var cb = callback;
         callback = null;
-        if (sync)
-            throw err;
         cb(err, root);
     }
 
 
-    parse.filename = filename;
+    parse.filename = 'srouce';
     var parsed = parse(source, self, undefined);
     finish(null, self);
     return undefined;
