@@ -191,6 +191,7 @@ Root.prototype.load = function load(filename, options, callback) {
         filename = [ filename ];
     for (var i = 0, resolved; i < filename.length; ++i)
         if (resolved = self.resolvePath("", filename[i]))
+            console.log('resolved',resolved);
             fetch(resolved);
 
     if (sync)
@@ -234,6 +235,129 @@ Root.prototype.loadSync = function loadSync(filename, options) {
         throw Error("not supported");
     return this.load(filename, options, SYNC);
 };
+
+Root.prototype.loadSource = function loadSource(source, callback) {
+
+
+    var self = this;
+
+    var sync = callback === SYNC; // undocumented
+
+    // Finishes loading by calling the callback (exactly once)
+    function finish(err, root) {
+        /* istanbul ignore if */
+        if (!callback)
+            return;
+        var cb = callback;
+        callback = null;
+        if (sync)
+            throw err;
+        cb(err, root);
+    }
+
+    // Processes a single file
+    function process(filename, source) {
+        try {
+            // if (util.isString(source) && source.charAt(0) === "{")
+            //     source = JSON.parse(source);
+            // if (!util.isString(source))
+            //     self.setOptions(source.options).addJSON(source.nested);
+            // else {
+            parse.filename = filename;
+            var parsed = parse(source, self, options),resolved;
+                // if (parsed.imports)
+                //     for (; i < parsed.imports.length; ++i)
+                //         if (resolved = self.resolvePath(filename, parsed.imports[i]))
+                //             fetch(resolved);
+                // if (parsed.weakImports)
+                //     for (i = 0; i < parsed.weakImports.length; ++i)
+                //         if (resolved = self.resolvePath(filename, parsed.weakImports[i]))
+                //             fetch(resolved, true);
+        } catch (err) {
+            finish(err);
+        }
+        if (!sync && !queued)
+            finish(null, self); // only once anyway
+    }
+
+    // Fetches a single file
+    function fetch(filename, weak) {
+
+        // Strip path if this file references a bundled definition
+        var idx = filename.lastIndexOf("google/protobuf/");
+        if (idx > -1) {
+            var altname = filename.substring(idx);
+            if (altname in common)
+                filename = altname;
+        }
+
+        // Skip if already loaded / attempted
+        if (self.files.indexOf(filename) > -1)
+            return;
+        self.files.push(filename);
+
+        // Shortcut bundled definitions
+        if (filename in common) {
+            if (sync)
+                process(filename, common[filename]);
+            else {
+                ++queued;
+                setTimeout(function() {
+                    --queued;
+                    process(filename, common[filename]);
+                });
+            }
+            return;
+        }
+
+        // Otherwise fetch from disk or network
+        if (sync) {
+            var source;
+            try {
+                source = util.fs.readFileSync(filename).toString("utf8");
+            } catch (err) {
+                if (!weak)
+                    finish(err);
+                return;
+            }
+            process(filename, source);
+        } else {
+            ++queued;
+            util.fetch(filename, function(err, source) {
+                --queued;
+                /* istanbul ignore if */
+                if (!callback)
+                    return; // terminated meanwhile
+                if (err) {
+                    /* istanbul ignore else */
+                    if (!weak)
+                        finish(err);
+                    else if (!queued) // can't be covered reliably
+                        finish(null, self);
+                    return;
+                }
+                process(filename, source);
+            });
+        }
+    }
+
+    var queued = 0;
+
+    // Assembling the root namespace doesn't require working type
+    // references anymore, so we can load everything in parallel
+    if (util.isString(filename))
+        filename = [ filename ];
+    for (var i = 0, resolved; i < filename.length; ++i)
+        if (resolved = self.resolvePath("", filename[i]))
+            fetch(resolved);
+
+    if (sync)
+        return self;
+    if (!queued)
+        finish(null, self);
+    return undefined;
+};
+
 
 /**
  * @override
